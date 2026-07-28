@@ -1,183 +1,84 @@
--- ============================================================
--- Banking Management Database System
--- Schema, sample data, views, stored procedures, and triggers
--- Author: Yaddula Sreevarsha
--- ============================================================
+# Banking Management Database System
 
-DROP DATABASE IF EXISTS banking_management;
-CREATE DATABASE banking_management;
-USE banking_management;
+A relational database system built in MySQL to manage customer records, accounts, and transactions — including advanced features like stored procedures, triggers, and multi-table views, simulating real-world back-end banking workflows.
 
--- ------------------------------------------------------------
--- 1. CORE TABLES
--- ------------------------------------------------------------
+## Features
 
-CREATE TABLE customers (
-    customer_id   INT AUTO_INCREMENT PRIMARY KEY,
-    full_name     VARCHAR(100) NOT NULL,
-    email         VARCHAR(100) UNIQUE NOT NULL,
-    phone         VARCHAR(15),
-    address       VARCHAR(200),
-    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+### Core
+- Customer, account, and transaction data modeling with linked tables
+- Referential integrity enforced through foreign keys and `ON DELETE CASCADE`
+- Check constraint preventing negative account balances
 
-CREATE TABLE accounts (
-    account_id     INT AUTO_INCREMENT PRIMARY KEY,
-    customer_id    INT NOT NULL,
-    account_type   ENUM('SAVINGS', 'CURRENT') NOT NULL DEFAULT 'SAVINGS',
-    balance        DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (customer_id) REFERENCES customers(customer_id)
-        ON DELETE CASCADE,
-    CONSTRAINT chk_balance_non_negative CHECK (balance >= 0)
-);
+### Advanced
+- **Views** — `customer_account_summary`, `high_value_customers`, and `transaction_history_detailed` for multi-table reporting without repeating complex joins
+- **Stored Procedure** — `transfer_funds(from_account, to_account, amount)` performs a safe, atomic fund transfer using `START TRANSACTION` / `COMMIT` / `ROLLBACK`, with row locking (`FOR UPDATE`) and a guard against overdrafts
+- **Trigger** — `trg_balance_audit` automatically logs every balance change to a `balance_audit_log` table, so no code outside the database can silently change a balance without being tracked
+- **Indexes** — added on foreign key and date columns to keep reporting queries fast as data grows
 
-CREATE TABLE transactions (
-    transaction_id   INT AUTO_INCREMENT PRIMARY KEY,
-    account_id       INT NOT NULL,
-    transaction_type ENUM('DEPOSIT', 'WITHDRAWAL', 'TRANSFER_IN', 'TRANSFER_OUT') NOT NULL,
-    amount           DECIMAL(12,2) NOT NULL,
-    transaction_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    remarks          VARCHAR(200),
-    FOREIGN KEY (account_id) REFERENCES accounts(account_id)
-        ON DELETE CASCADE
-);
+## Tech Stack
 
--- Audit table populated automatically by a trigger (advanced feature)
-CREATE TABLE balance_audit_log (
-    log_id        INT AUTO_INCREMENT PRIMARY KEY,
-    account_id    INT NOT NULL,
-    old_balance   DECIMAL(12,2),
-    new_balance   DECIMAL(12,2),
-    changed_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+- **Database:** MySQL 8.0
+- **Concepts used:** Joins, Foreign Keys, Views, Stored Procedures, Triggers, Transactions (ACID), Indexing, Constraints
 
--- ------------------------------------------------------------
--- 2. INDEXES (performance optimization for reporting queries)
--- ------------------------------------------------------------
+## Database Design
 
-CREATE INDEX idx_accounts_customer ON accounts(customer_id);
-CREATE INDEX idx_transactions_account ON transactions(account_id);
-CREATE INDEX idx_transactions_date ON transactions(transaction_date);
+```
+customers (customer_id, full_name, email, phone, address)
+       │
+       ▼
+accounts (account_id, customer_id FK, account_type, balance)
+       │
+       ▼
+transactions (transaction_id, account_id FK, transaction_type, amount, remarks)
 
--- ------------------------------------------------------------
--- 3. SAMPLE DATA
--- ------------------------------------------------------------
+balance_audit_log (log_id, account_id, old_balance, new_balance, changed_at)
+   — populated automatically by trg_balance_audit
+```
 
-INSERT INTO customers (full_name, email, phone, address) VALUES
-('Ananya Rao', 'ananya.rao@email.com', '9876543210', 'Hyderabad, Telangana'),
-('Kiran Kumar', 'kiran.kumar@email.com', '9876543211', 'Bengaluru, Karnataka'),
-('Divya Sharma', 'divya.sharma@email.com', '9876543212', 'Chennai, Tamil Nadu'),
-('Rahul Verma', 'rahul.verma@email.com', '9876543213', 'Hyderabad, Telangana');
+## Project Structure
 
-INSERT INTO accounts (customer_id, account_type, balance) VALUES
-(1, 'SAVINGS', 50000.00),
-(2, 'CURRENT', 120000.00),
-(3, 'SAVINGS', 75000.00),
-(4, 'SAVINGS', 30000.00);
+```
+banking-management-database/
+├── setup.sql            # Schema, sample data, views, procedure, trigger
+├── sample_queries.sql   # Reporting queries + procedure demo
+├── sample_output.txt    # Real console output from running the above
+├── sample_output_screenshot.png
+└── README.md
+```
 
-INSERT INTO transactions (account_id, transaction_type, amount, remarks) VALUES
-(1, 'DEPOSIT', 10000.00, 'Salary credit'),
-(1, 'WITHDRAWAL', 2000.00, 'ATM withdrawal'),
-(2, 'DEPOSIT', 25000.00, 'Client payment'),
-(3, 'WITHDRAWAL', 5000.00, 'Bill payment'),
-(4, 'DEPOSIT', 8000.00, 'Cash deposit');
+## Setup & Running
 
--- ------------------------------------------------------------
--- 4. VIEWS (advanced reporting layer)
--- ------------------------------------------------------------
+1. **Install MySQL 8.0+**
 
--- View: customer account summary (join + aggregate)
-CREATE VIEW customer_account_summary AS
-SELECT
-    c.customer_id,
-    c.full_name,
-    c.email,
-    COUNT(a.account_id)         AS total_accounts,
-    SUM(a.balance)              AS total_balance
-FROM customers c
-JOIN accounts a ON c.customer_id = a.customer_id
-GROUP BY c.customer_id, c.full_name, c.email;
+2. **Run the setup script** (creates database, tables, sample data, views, procedure, trigger)
+   ```bash
+   mysql -u root -p < setup.sql
+   ```
 
--- View: high value customers (balance above threshold)
-CREATE VIEW high_value_customers AS
-SELECT customer_id, full_name, total_balance
-FROM customer_account_summary
-WHERE total_balance >= 75000;
+3. **Run the sample queries** to see reporting views and the transfer procedure in action
+   ```bash
+   mysql -u root -p --table < sample_queries.sql
+   ```
 
--- View: transaction history with customer context (multi-table join)
-CREATE VIEW transaction_history_detailed AS
-SELECT
-    t.transaction_id,
-    c.full_name,
-    a.account_id,
-    a.account_type,
-    t.transaction_type,
-    t.amount,
-    t.transaction_date,
-    t.remarks
-FROM transactions t
-JOIN accounts a ON t.account_id = a.account_id
-JOIN customers c ON a.customer_id = c.customer_id
-ORDER BY t.transaction_date DESC;
+## Sample Output
 
--- ------------------------------------------------------------
--- 5. STORED PROCEDURE (advanced: safe fund transfer with transaction control)
--- ------------------------------------------------------------
+Real output from running `sample_queries.sql` against a live MySQL instance — includes a fund transfer via the stored procedure, the trigger auto-logging both balance changes, and the procedure correctly blocking an overdraft attempt:
 
-DELIMITER //
+![Sample run](sample_output_screenshot.png)
 
-CREATE PROCEDURE transfer_funds(
-    IN p_from_account INT,
-    IN p_to_account INT,
-    IN p_amount DECIMAL(12,2)
-)
-BEGIN
-    DECLARE from_balance DECIMAL(12,2);
-    DECLARE EXIT HANDLER FOR SQLEXCEPTION
-    BEGIN
-        ROLLBACK;
-        RESIGNAL;
-    END;
+Full raw output (all reporting queries) is available in [`sample_output.txt`](sample_output.txt).
 
-    START TRANSACTION;
+## What This Project Demonstrates
 
-    SELECT balance INTO from_balance
-    FROM accounts WHERE account_id = p_from_account FOR UPDATE;
+- Relational database design with normalized tables and enforced constraints
+- Writing multi-table joins and aggregate queries for reporting
+- Building reusable views to simplify complex reporting logic
+- Writing a stored procedure with transaction control (COMMIT/ROLLBACK) to keep a multi-step operation atomic and consistent
+- Using a trigger to enforce auditing without relying on application-level code
+- Applying indexing for query performance on foreign key and date columns
 
-    IF from_balance < p_amount THEN
-        SIGNAL SQLSTATE '45000'
-        SET MESSAGE_TEXT = 'Insufficient balance for transfer';
-    END IF;
+## Future Improvements
 
-    UPDATE accounts SET balance = balance - p_amount WHERE account_id = p_from_account;
-    UPDATE accounts SET balance = balance + p_amount WHERE account_id = p_to_account;
-
-    INSERT INTO transactions (account_id, transaction_type, amount, remarks)
-    VALUES (p_from_account, 'TRANSFER_OUT', p_amount, CONCAT('Transfer to account ', p_to_account));
-
-    INSERT INTO transactions (account_id, transaction_type, amount, remarks)
-    VALUES (p_to_account, 'TRANSFER_IN', p_amount, CONCAT('Transfer from account ', p_from_account));
-
-    COMMIT;
-END //
-
-DELIMITER ;
-
--- ------------------------------------------------------------
--- 6. TRIGGER (advanced: auto-log every balance change)
--- ------------------------------------------------------------
-
-DELIMITER //
-
-CREATE TRIGGER trg_balance_audit
-AFTER UPDATE ON accounts
-FOR EACH ROW
-BEGIN
-    IF OLD.balance <> NEW.balance THEN
-        INSERT INTO balance_audit_log (account_id, old_balance, new_balance)
-        VALUES (NEW.account_id, OLD.balance, NEW.balance);
-    END IF;
-END //
-
-DELIMITER ;
+- Add role-based access control (read-only reporting user vs. admin user)
+- Add a simple front-end (Python/Java) to interact with the database
+- Add scheduled events for periodic interest calculation on savings accounts
